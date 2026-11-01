@@ -1,0 +1,39 @@
+{
+  "numero": 3000,
+  "nome": "MEGA-SENA",
+  "dataApuracao": "26/10/2026",
+  "dezenasSorteadasOrdemSorteio": ["04", "12", "28", "33", "45", "58"],
+  "listaDezenas": ["04", "12", "28", "33", "45", "58"],
+  "valorArrecadado": 55000000.0,
+  "acumulado": false,
+  "listaRateioPremio": [
+    {
+      "faixa": 1,
+      "descricaoFaixa": "6 acertos",
+      "numeroDeGanhadores": 1,
+      "valorPremio": 45000000.0
+    },
+    {
+      "faixa": 2,
+      "descricaoFaixa": "5 acertos",
+      "numeroDeGanhadores": 85,
+      "valorPremio": 42000.0
+    },
+    {
+      "faixa": 3,
+      "descricaoFaixa": "4 acertos",
+      "numeroDeGanhadores": 6500,
+      "valorPremio": 850.0
+    }
+  ],
+  "listaMunicipioUFGanhadores": [
+    {
+      "posicao": 1,
+      "ganhadores": 1,
+      "municipio": "SAO PAULO",
+      "uf": "SP",
+      "nomeFatansiaUF": "São Paulo",
+      "serie": ""
+    }
+  ]
+}
