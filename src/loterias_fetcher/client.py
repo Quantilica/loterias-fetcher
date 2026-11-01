@@ -74,3 +74,10 @@ class LoteriasClient:
         """Download XLSX with manifest sidecar."""
         url = self.download_url_for_modalidade(modalidade_slug)
         return self.client.download_with_manifest(url, destination)
+
+    def download_contest(
+        self, modalidade_slug: str, contest_number: int | None, destination: Path
+    ) -> Path:
+        """Download contest JSON with manifest sidecar."""
+        url = self.contest_url(modalidade_slug, contest_number)
+        return self.client.download_with_manifest(url, destination)

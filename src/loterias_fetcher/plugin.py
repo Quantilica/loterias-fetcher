@@ -75,26 +75,33 @@ def _get_backfill_units() -> list[str]:
     return units
 
 
-def _run_backfill_unit(unit: str) -> None:
-    """Download single contest JSON."""
+def _run_backfill_unit(unit: str, output_dir: Path | None = None) -> None:
+    """Download single contest JSON with manifest sidecar."""
     client = LoteriasClient()
     slug, contest_s = unit.split(":", 1)
     contest_num = int(contest_s)
-    out_dir = Path("/data/loterias/detalhe")
+    base_dir = output_dir or Path("/data/loterias")
+    out_dir = base_dir / "detalhe"
     out_dir.mkdir(parents=True, exist_ok=True)
     today = dt.date.today().strftime("%Y%m%d")
     out_file = out_dir / f"{slug}_{contest_num}@{today}.json"
     if not out_file.exists():
-        data = client.get_contest(slug, contest_num)
-        import json
+        client.download_contest(slug, contest_num, out_file)
 
-        with open(out_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
+
+def _run_backfill_wrapper(unit: str, output_dir: Path | None = None) -> None:
+    import inspect
+
+    sig = inspect.signature(_run_backfill_unit)
+    if len(sig.parameters) >= 2:
+        _run_backfill_unit(unit, output_dir)
+    else:
+        _run_backfill_unit(unit)
 
 
 fetcher.command_backfill(
     lambda: _get_backfill_units(),
-    lambda u: _run_backfill_unit(u),
+    _run_backfill_wrapper,
     name="backfill",
     help="Carga histórica exaustiva de rateio e municípios ganhadores (JSON)",
 )
