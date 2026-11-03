@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 from pathlib import Path
 from typing import Any
 
 from quantilica.cli.sdk import FetcherApp, make_resolve_groups
+from quantilica.core.sync import FreshnessPolicy
 
 from .catalog import GROUP_ALIASES, GROUPS, list_datasets
 from .client import LoteriasClient
@@ -33,6 +35,7 @@ fetcher = FetcherApp(
     list_datasets=list_datasets,
     path_builder=path_builder,
     default_output=Path("/data/loterias"),
+    freshness_policy=FreshnessPolicy.REMOTE_ONLY,
 )
 
 
@@ -80,7 +83,9 @@ def _run_backfill_unit(unit: str, output_dir: Path | None = None) -> None:
     client = LoteriasClient()
     slug, contest_s = unit.split(":", 1)
     contest_num = int(contest_s)
-    base_dir = output_dir or Path("/data/loterias")
+    base_dir = output_dir or (
+        Path(os.environ.get("DATA_DIR", "~/data")).expanduser() / "loterias"
+    )
     out_dir = base_dir / "detalhe"
     out_dir.mkdir(parents=True, exist_ok=True)
     today = dt.date.today().strftime("%Y%m%d")
