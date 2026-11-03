@@ -29,6 +29,24 @@ SOURCE_ID = "loterias"
 DATASETS = ["concursos", "rateio", "ganhadores_municipio"]
 
 
+RATEIO_SCHEMA: dict[str, Any] = {
+    "modalidade": pl.Utf8,
+    "concurso": pl.Int64,
+    "faixa": pl.Int64,
+    "descricao_faixa": pl.Utf8,
+    "ganhadores": pl.Int64,
+    "valor_premio": pl.Float64,
+}
+GANHADORES_SCHEMA: dict[str, Any] = {
+    "modalidade": pl.Utf8,
+    "concurso": pl.Int64,
+    "posicao": pl.Int64,
+    "municipio": pl.Utf8,
+    "uf": pl.Utf8,
+    "ganhadores": pl.Int64,
+}
+
+
 def _clean_str(val: Any) -> str:
     if val is None:
         return ""
@@ -190,19 +208,21 @@ def parse_xlsx_concursos(file_path: Path, modalidade: str) -> pl.DataFrame:
 def parse_json_detalhe(
     file_path: Path, modalidade: str
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Parse a contest detail JSON file into rateio and ganhadores records."""
-    try:
-        with open(file_path, encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        return [], []
+    """Parse a contest detail JSON file into rateio and ganhadores records.
+
+    Raises ``ValueError``/``OSError`` for an unreadable file, a JSON that is not an
+    object or one without the contest number: the converter counts these as errors
+    instead of treating the file as empty.
+    """
+    with open(file_path, encoding="utf-8") as f:
+        data = json.load(f)
 
     if not isinstance(data, dict):
-        return [], []
+        raise ValueError(f"{file_path.name}: JSON nao e um objeto")
 
     concurso = data.get("numero") or data.get("concurso")
     if concurso is None:
-        return [], []
+        raise ValueError(f"{file_path.name}: sem numero do concurso")
 
     rateio_rows: list[dict[str, Any]] = []
     lista_rateio = data.get("listaRateioPremio") or []
@@ -336,45 +356,64 @@ class LoteriasLakeConverter:
                 mod = base_part.split("_")[0].lower()
                 files_by_mod.setdefault(mod, []).append(jf)
 
+            # Um concurso = um arquivo de origem = um membro do arquivo agrupado
+            # ``<modalidade>.parquet`` da particao. Escrever a modalidade inteira com
+            # o primeiro JSON como ``src`` (como era) fazia a reconversao apos um
+            # concurso novo ser pulada por sha256 e perdia as demais linhas.
             for mod_slug, files in files_by_mod.items():
                 if mod_slug not in MODALIDADES:
                     continue
-
-                all_rateio: list[dict[str, Any]] = []
-                all_ganhadores: list[dict[str, Any]] = []
-
-                for jf in files:
-                    r_rows, g_rows = parse_json_detalhe(jf, mod_slug)
-                    all_rateio.extend(r_rows)
-                    all_ganhadores.extend(g_rows)
-
-                # Write rateio
-                if "rateio" in target_datasets and all_rateio:
+                partitions = {"modalidade": mod_slug}
+                targets = (
+                    ("rateio", writer_rateio, RATEIO_SCHEMA, 0),
+                    ("ganhadores_municipio", writer_ganhadores, GANHADORES_SCHEMA, 1),
+                )
+                for jf in sorted(files):
+                    pending = [
+                        t
+                        for t in targets
+                        if t[0] in target_datasets
+                        and not self._member_current(t[1], jf, mod_slug, res)
+                    ]
+                    if not pending:
+                        continue
                     try:
-                        df_r = pl.DataFrame(all_rateio)
-                        writer_rateio.write_polars(
-                            df_r,
-                            files[0],
-                            partitions={"modalidade": mod_slug},
-                        )
-                        res.converted += 1
+                        parsed = parse_json_detalhe(jf, mod_slug)
                     except Exception as exc:
-                        res.errors.append(f"Erro em rateio {mod_slug}: {exc}")
-
-                # Write ganhadores
-                if "ganhadores_municipio" in target_datasets and all_ganhadores:
-                    try:
-                        df_g = pl.DataFrame(all_ganhadores)
-                        writer_ganhadores.write_polars(
-                            df_g,
-                            files[0],
-                            partitions={"modalidade": mod_slug},
-                        )
-                        res.converted += 1
-                    except Exception as exc:
-                        res.errors.append(f"Erro em ganhadores {mod_slug}: {exc}")
+                        res.errors.append(f"Erro em detalhe {jf.name}: {exc}")
+                        continue
+                    for ds_name, writer, schema, idx in pending:
+                        rows = parsed[idx]
+                        if not rows:
+                            continue
+                        try:
+                            written = writer.write_member(
+                                pl.DataFrame(rows, schema=schema, strict=False),
+                                jf,
+                                group_key=mod_slug,
+                                partitions=partitions,
+                            )
+                        except Exception as exc:
+                            res.errors.append(f"Erro em {ds_name} {jf.name}: {exc}")
+                            continue
+                        if written.status == "skipped":
+                            res.skipped += 1
+                        else:
+                            res.converted += 1
 
         return res
+
+    @staticmethod
+    def _member_current(
+        writer: LakeWriter, jf: Path, mod_slug: str, res: ConvertResult
+    ) -> bool:
+        """Conta ``skipped`` quando o JSON ja e membro do agrupado com o mesmo sha."""
+        if writer.is_current_member(
+            jf, group_key=mod_slug, partitions={"modalidade": mod_slug}
+        ):
+            res.skipped += 1
+            return True
+        return False
 
 
 converter = LoteriasLakeConverter()
