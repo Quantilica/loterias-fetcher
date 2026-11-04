@@ -8,6 +8,7 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 ## [Não lançado]
 
 ### Corrigido
+- `lake`: XLSX que o leitor padrão (calamine) rejeita, por exemplo com célula numérica malformada (`Parse float error: invalid float literal`), é relido como texto, sem descartar linhas; valores em formato brasileiro (`1.234,56`) seguem a regra de conversão existente e células vazias viram nulo.
 - Sem o extra `analysis`, o comando `convert` termina com código 1 e a instrução de instalação (`quantilica install loterias --extra analysis`), sem traceback.
 
 ### Alterado

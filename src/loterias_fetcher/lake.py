@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
+import posixpath
 import re
 import unicodedata
+import zipfile
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree as ET
 
 try:
     import polars as pl
@@ -25,6 +29,8 @@ except ImportError as exc:
     ) from exc
 
 from loterias_fetcher.constants import MODALIDADES
+
+logger = logging.getLogger(__name__)
 
 SOURCE_ID = "loterias"
 DATASETS = ["concursos", "rateio", "ganhadores_municipio"]
@@ -60,9 +66,113 @@ def _norm_col(col_name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", s.lower()).strip("_")
 
 
+_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+_REL_NS = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+_DOC_REL = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+
+
+def _col_index(ref: str) -> int:
+    letters = re.match(r"[A-Z]+", ref)
+    n = 0
+    for ch in letters.group(0) if letters else "A":
+        n = n * 26 + ord(ch) - 64
+    return n - 1
+
+
+def _si_text(si: ET.Element) -> str:
+    """Texto de um item de sharedStrings (ignora a fonetica ``rPh``)."""
+    return "".join(t.text or "" for t in si.iter(f"{_NS}t") if not _in_phonetic(si, t))
+
+
+def _in_phonetic(si: ET.Element, t: ET.Element) -> bool:
+    return any(t in list(ph.iter(f"{_NS}t")) for ph in si.iter(f"{_NS}rPh"))
+
+
+def _first_sheet_path(zf: zipfile.ZipFile) -> str:
+    wb = ET.fromstring(zf.read("xl/workbook.xml"))
+    sheet = wb.find(f"{_NS}sheets/{_NS}sheet")
+    if sheet is None:
+        raise ValueError("XLSX sem planilhas")
+    rid = sheet.get(_DOC_REL)
+    rels = ET.fromstring(zf.read("xl/_rels/workbook.xml.rels"))
+    for rel in rels.iter(f"{_REL_NS}Relationship"):
+        if rel.get("Id") == rid:
+            target = rel.get("Target") or ""
+            return (
+                target.lstrip("/")
+                if target.startswith("/")
+                else posixpath.normpath(posixpath.join("xl", target))
+            )
+    raise ValueError("XLSX: planilha sem relacionamento")
+
+
+def read_xlsx_as_text(file_path: Path) -> pl.DataFrame:
+    """Le a primeira planilha de um XLSX com todas as celulas como texto.
+
+    Alternativa ao ``pl.read_excel`` para quando o calamine rejeita o arquivo (por
+    exemplo, celula numerica com ``1.234,56`` ou conteudo nao numerico: ``Parse
+    float error: invalid float literal``). O conteudo da celula vai como esta no
+    XML, sem converter nada; a regra de conversao fica em ``parse_xlsx_concursos``.
+    A primeira linha e o cabecalho; nenhuma linha de dados e descartada.
+    """
+    with zipfile.ZipFile(file_path) as zf:
+        shared: list[str] = []
+        if "xl/sharedStrings.xml" in zf.namelist():
+            root = ET.fromstring(zf.read("xl/sharedStrings.xml"))
+            shared = [_si_text(si) for si in root.iter(f"{_NS}si")]
+        rows: list[dict[int, str | None]] = []
+        with zf.open(_first_sheet_path(zf)) as fh:
+            for _, el in ET.iterparse(fh):
+                if el.tag != f"{_NS}row":
+                    continue
+                cells: dict[int, str | None] = {}
+                for c in el.findall(f"{_NS}c"):
+                    kind = c.get("t")
+                    v = c.find(f"{_NS}v")
+                    if kind == "inlineStr":
+                        is_ = c.find(f"{_NS}is")
+                        val: str | None = _si_text(is_) if is_ is not None else None
+                    elif v is None or v.text is None:
+                        val = None
+                    elif kind == "s":
+                        val = shared[int(v.text)]
+                    else:
+                        val = v.text
+                    cells[_col_index(c.get("r") or "A1")] = val
+                rows.append(cells)
+                el.clear()
+    if not rows:
+        return pl.DataFrame()
+    width = max((max(r) + 1 for r in rows if r), default=0)
+    header = [(rows[0].get(i) or "").strip() or f"column_{i + 1}" for i in range(width)]
+    seen: dict[str, int] = {}
+    names = []
+    for h in header:
+        seen[h] = seen.get(h, 0) + 1
+        names.append(h if seen[h] == 1 else f"{h}_{seen[h]}")
+    data = {n: [r.get(i) for r in rows[1:]] for i, n in enumerate(names)}
+    return pl.DataFrame(data, schema={n: pl.Utf8 for n in names})
+
+
+def _read_excel_tolerant(file_path: Path) -> pl.DataFrame:
+    """``pl.read_excel`` e, se o calamine rejeitar o arquivo, leitura como texto."""
+    try:
+        return pl.read_excel(file_path)
+    except Exception as exc:
+        logger.warning(
+            "LOTERIAS %s: leitura padrao falhou (%s); relendo como texto",
+            file_path.name,
+            exc,
+        )
+        try:
+            return read_xlsx_as_text(file_path)
+        except Exception as fallback_exc:
+            raise exc from fallback_exc
+
+
 def parse_xlsx_concursos(file_path: Path, modalidade: str) -> pl.DataFrame:
     """Parse a Caixa XLSX file into standardized concursos records."""
-    df_raw = pl.read_excel(file_path)
+    df_raw = _read_excel_tolerant(file_path)
     if df_raw.height == 0:
         return pl.DataFrame(
             schema={

@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
+import zipfile
 from pathlib import Path
 
 import polars as pl
+import pytest
 from quantilica.analytics.lake import check_dataset
 
 from loterias_fetcher.constants import MODALIDADES
 from loterias_fetcher.lake import converter
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+_pl_read_excel = pl.read_excel
 
 
 def test_converter_metadata() -> None:
@@ -155,3 +159,72 @@ def test_json_invalido_e_erro_contado_e_nao_derruba_os_demais(tmp_path: Path) ->
     assert sorted(_rows(lake_dir / "loterias" / "rateio")["concurso"].unique()) == [
         3000
     ]
+
+
+def _xlsx_com_celula_numerica_malformada(src: Path, dest: Path) -> None:
+    """Copia ``src`` e acrescenta a coluna ``Arrecadacao Total`` com células
+    numéricas (sem ``t="s"``) cujo conteúdo não é um float: o calamine falha com
+    ``Parse float error: invalid float literal``."""
+    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dest, "w") as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if item.filename == "xl/worksheets/sheet1.xml":
+                xml = data.decode("utf-8")
+                xml = re.sub(
+                    r'<dimension ref="A1:Y(\d+)"/>', r'<dimension ref="A1:Z\1"/>', xml
+                )
+                xml = xml.replace(
+                    '</row><row r="2"',
+                    '<c r="Z1" t="inlineStr"><is><t>Arrecadacao Total</t></is></c>'
+                    '</row><row r="2"',
+                    1,
+                )
+                xml = xml.replace(
+                    '</row><row r="3"',
+                    '<c r="Z2"><v>1.234,56</v></c></row><row r="3"',
+                    1,
+                )
+                xml = xml.replace(
+                    '</row><row r="4"', '<c r="Z3"><v></v></c></row><row r="4"', 1
+                )
+                data = xml.encode("utf-8")
+            zout.writestr(item, data)
+
+
+def test_xlsx_com_celula_numerica_malformada_nao_perde_linhas(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw_dir = tmp_path / "raw"
+    concursos_raw = raw_dir / "concursos"
+    concursos_raw.mkdir(parents=True)
+    dest = concursos_raw / "lotomania@20261104.xlsx"
+    _xlsx_com_celula_numerica_malformada(FIXTURES_DIR / "lotomania.xlsx", dest)
+
+    # O calamine antigo falha neste arquivo; o atual é tolerante. Simula a falha.
+    def _calamine_falha(*_a, **_k):
+        raise RuntimeError(
+            "calamine error: Xlsx error: Parse float error: invalid float literal"
+        )
+
+    monkeypatch.setattr(pl, "read_excel", _calamine_falha)
+    res = converter.convert(raw_dir, tmp_path / "lake")
+    assert not res.errors, res.errors
+    n_ref = _pl_read_excel(FIXTURES_DIR / "lotomania.xlsx").height
+    rows = _rows(tmp_path / "lake" / "loterias" / "concursos")
+    assert rows.height == n_ref  # nenhuma linha perdida
+    by_concurso = {r["concurso"]: r for r in rows.iter_rows(named=True)}
+    assert by_concurso[1001]["arrecadacao_total"] == 1234.56  # "1.234,56" lido como BR
+    assert by_concurso[1002]["arrecadacao_total"] is None  # vazio -> nulo
+
+
+def test_leitura_como_texto_preserva_celulas_e_cabecalho(tmp_path: Path) -> None:
+    from loterias_fetcher.lake import read_xlsx_as_text
+
+    dest = tmp_path / "x.xlsx"
+    _xlsx_com_celula_numerica_malformada(FIXTURES_DIR / "lotomania.xlsx", dest)
+    df = read_xlsx_as_text(dest)
+    ref = _pl_read_excel(FIXTURES_DIR / "lotomania.xlsx")
+    assert df.height == ref.height
+    assert df["Concurso"].to_list() == [str(v) for v in ref["Concurso"]]
+    assert df["Bola1"][0] == "01"  # texto preservado (zero à esquerda)
+    assert df["Arrecadacao Total"].to_list()[:2] == ["1.234,56", None]
