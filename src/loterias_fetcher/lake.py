@@ -17,7 +17,7 @@ try:
     from quantilica.analytics.lake import ConvertResult, LakeWriter
     from quantilica.core.lake import (
         DatasetDescriptor,
-        file_key,
+        composite_file_key,
         partition_types_for,
         select_current,
     )
@@ -409,7 +409,7 @@ class LoteriasLakeConverter:
                 current_files = select_current(xlsx_files)
                 for raw_file in current_files:
                     # Stem is like 'megasena@20261101'
-                    mod_slug = file_key(raw_file).lower()
+                    mod_slug = composite_file_key(raw_file).lower()
                     if mod_slug not in MODALIDADES:
                         continue
                     try:
@@ -463,7 +463,7 @@ class LoteriasLakeConverter:
             files_by_mod: dict[str, list[Path]] = {}
             for jf in json_files:
                 # Format: {mod}_{concurso}@{stamp}.json
-                base_part = file_key(jf)
+                base_part = composite_file_key(jf)
                 mod = base_part.split("_")[0].lower()
                 files_by_mod.setdefault(mod, []).append(jf)
 
