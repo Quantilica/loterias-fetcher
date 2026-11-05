@@ -5,14 +5,10 @@ Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/),
 e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
-## [Não lançado]
+## [0.2.1] - 2026-11-04
 
 ### Corrigido
 - `lake`: XLSX que o leitor padrão (calamine) rejeita, por exemplo com célula numérica malformada (`Parse float error: invalid float literal`), é relido como texto, sem descartar linhas; valores em formato brasileiro (`1.234,56`) seguem a regra de conversão existente e células vazias viram nulo.
-- Sem o extra `analysis`, o comando `convert` termina com código 1 e a instrução de instalação (`quantilica install loterias --extra analysis`), sem traceback.
-
-### Alterado
-- O nome-base dos arquivos brutos vem de `file_key` do `quantilica-core`, com resultado idêntico no lake.
 
 ## [0.2.0] - 2026-11-04
 
@@ -23,6 +19,10 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
   era pulado por sha256 e as linhas dos demais concursos se perdiam.
 - Lake: `converted` não conta mais escritas puladas (`skipped` separado). JSON ilegível
   ou sem número de concurso vira erro contado, não arquivo vazio.
+- Sem o extra `analysis`, o comando `convert` termina com código 1 e a instrução de instalação (`quantilica install loterias --extra analysis`), sem traceback.
+
+### Alterado
+- O nome-base dos arquivos brutos vem de `file_key` do `quantilica-core`, com resultado idêntico no lake.
 
 ## [0.1.0] - 2026-11-01
 
