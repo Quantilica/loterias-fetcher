@@ -8,12 +8,15 @@ from pathlib import Path
 from typing import Any
 
 from quantilica.cli.sdk import FetcherApp, make_resolve_groups
+from quantilica.core.logging import get_logger
 from quantilica.core.sync import FreshnessPolicy
 
 from .catalog import GROUP_ALIASES, GROUPS, list_datasets
 from .client import LoteriasClient
 from .constants import MODALIDADES
 from .storage import DataRepository
+
+logger = get_logger(__name__)
 
 resolve_groups = make_resolve_groups(
     GROUPS, {alias: [canon] for alias, canon in GROUP_ALIASES.items()}
@@ -73,8 +76,12 @@ def _get_backfill_units() -> list[str]:
             if num:
                 for c in range(1, int(num) + 1):
                     units.append(f"{slug}:{c}")
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Backfill: modalidade %s ignorada (último concurso indisponível): %s",
+                slug,
+                exc,
+            )
     return units
 
 

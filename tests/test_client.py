@@ -60,3 +60,13 @@ def test_resolve_api_host_fallback_on_error(monkeypatch: pytest.MonkeyPatch) -> 
     client = LoteriasClient()
     host = client.resolve_api_host()
     assert host == DEFAULT_API_HOST
+
+
+def test_resolve_api_host_falha_loga_warning(caplog: pytest.LogCaptureFixture) -> None:
+    """Falha ao ler o params.txt cai no host padrão, mas avisa."""
+    http = MagicMock(spec=HttpClient)
+    http.get.side_effect = RuntimeError("timeout")
+    with caplog.at_level("WARNING"):
+        host = LoteriasClient(client=http).resolve_api_host()
+    assert host == DEFAULT_API_HOST
+    assert "timeout" in caplog.text

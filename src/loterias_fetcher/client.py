@@ -6,8 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from quantilica.core.http import HostPolicy, HttpClient
+from quantilica.core.logging import get_logger
 
 from .constants import DEFAULT_API_HOST, MODALIDADES, PARAMS_URL
+
+logger = get_logger(__name__)
 
 
 class LoteriasClient:
@@ -36,8 +39,13 @@ class LoteriasClient:
                     if host:
                         self._api_host = host
                         return host
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 - cai no host padrão, mas avisa
+            logger.warning(
+                "Falha ao ler %s (%s); usando o host padrão %s",
+                PARAMS_URL,
+                exc,
+                DEFAULT_API_HOST,
+            )
 
         self._api_host = DEFAULT_API_HOST
         return self._api_host

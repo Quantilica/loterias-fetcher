@@ -38,3 +38,22 @@ def test_cli_backfill(tmp_path: Path, monkeypatch) -> None:
     result = runner.invoke(app, ["backfill", "-o", str(tmp_path)])
     assert result.exit_code == 0
     assert executed == ["megasena:1", "megasena:2"]
+
+
+def test_backfill_units_loga_modalidade_com_falha(monkeypatch, caplog) -> None:
+    """Modalidade que falha é registrada em warning, sem derrubar as demais."""
+    from loterias_fetcher import plugin
+
+    class FakeClient:
+        def get_contest(self, slug: str) -> dict:
+            if slug == "megasena":
+                raise RuntimeError("503 fora do ar")
+            return {"numero": 2}
+
+    monkeypatch.setattr(plugin, "LoteriasClient", FakeClient)
+    with caplog.at_level("WARNING"):
+        units = plugin._get_backfill_units()
+    assert "megasena:1" not in units
+    assert any(u.endswith(":2") for u in units)
+    assert "megasena" in caplog.text
+    assert "503 fora do ar" in caplog.text

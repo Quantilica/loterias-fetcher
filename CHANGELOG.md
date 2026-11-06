@@ -7,6 +7,9 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ## [Não lançado]
 
+### Corrigido
+- O `backfill` e a leitura do endereço da API deixam de engolir erros: modalidade que falha ao obter o último concurso e falha ao ler o `params.txt` (que cai no host padrão) agora são registradas em `warning`.
+
 ### Alterado
 - A chave do arquivo bruto no lake passa a ser montada com `composite_file_key` do `quantilica-core` (nome do arquivo e, quando houver, o membro do ZIP), sem mudar as partições.
 
