@@ -7,6 +7,8 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ## [Não lançado]
 
+## [0.2.2] - 2026-11-06
+
 ### Corrigido
 - O `backfill` e a leitura do endereço da API deixam de engolir erros: modalidade que falha ao obter o último concurso e falha ao ler o `params.txt` (que cai no host padrão) agora são registradas em `warning`.
 
