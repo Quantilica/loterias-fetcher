@@ -1,0 +1,56 @@
+{
+  "fonte": "loterias",
+  "dataset": "concursos",
+  "gerado_em": "2026-11-09T13:56:45+00:00",
+  "particoes": [
+    "modalidade"
+  ],
+  "colunas": [
+    {
+      "nome": "concurso",
+      "tipos": [
+        "int64"
+      ]
+    },
+    {
+      "nome": "data_sorteio",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "dezenas",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "arrecadacao_total",
+      "tipos": [
+        "double",
+        "null"
+      ]
+    },
+    {
+      "nome": "acumulado",
+      "tipos": [
+        "bool"
+      ]
+    },
+    {
+      "nome": "valor_acumulado",
+      "tipos": [
+        "double",
+        "null"
+      ]
+    },
+    {
+      "nome": "estimativa_premio",
+      "tipos": [
+        "double",
+        "null"
+      ]
+    }
+  ],
+  "arquivos": 11
+}

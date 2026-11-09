@@ -1,0 +1,47 @@
+{
+  "fonte": "loterias",
+  "dataset": "ganhadores_municipio",
+  "gerado_em": "2026-11-09T13:56:45+00:00",
+  "particoes": [
+    "modalidade"
+  ],
+  "colunas": [
+    {
+      "nome": "concurso",
+      "tipos": [
+        "int64"
+      ]
+    },
+    {
+      "nome": "posicao",
+      "tipos": [
+        "int64"
+      ]
+    },
+    {
+      "nome": "municipio",
+      "tipos": [
+        "string"
+      ]
+    },
+    {
+      "nome": "uf",
+      "tipos": [
+        "string"
+      ]
+    },
+    {
+      "nome": "ganhadores",
+      "tipos": [
+        "int64"
+      ]
+    },
+    {
+      "nome": "_origem",
+      "tipos": [
+        "string"
+      ]
+    }
+  ],
+  "arquivos": 5
+}

@@ -1,0 +1,47 @@
+{
+  "fonte": "loterias",
+  "dataset": "rateio",
+  "gerado_em": "2026-11-09T13:56:45+00:00",
+  "particoes": [
+    "modalidade"
+  ],
+  "colunas": [
+    {
+      "nome": "concurso",
+      "tipos": [
+        "int64"
+      ]
+    },
+    {
+      "nome": "faixa",
+      "tipos": [
+        "int64"
+      ]
+    },
+    {
+      "nome": "descricao_faixa",
+      "tipos": [
+        "string"
+      ]
+    },
+    {
+      "nome": "ganhadores",
+      "tipos": [
+        "int64"
+      ]
+    },
+    {
+      "nome": "valor_premio",
+      "tipos": [
+        "double"
+      ]
+    },
+    {
+      "nome": "_origem",
+      "tipos": [
+        "string"
+      ]
+    }
+  ],
+  "arquivos": 11
+}
