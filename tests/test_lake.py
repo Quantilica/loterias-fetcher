@@ -271,3 +271,41 @@ def test_leitura_como_texto_sem_atributo_r_usa_a_posicao(tmp_path: Path) -> None
     assert df["Concurso"].to_list() == ["1", "2"]
     assert df["Bola1"].to_list() == ["01", "03"]
     assert df["Bola2"].to_list() == ["02", "04"]
+
+
+def test_leitura_sem_atributo_r_avisa_linha_com_outro_numero_de_celulas(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    from loterias_fetcher.lake import read_xlsx_as_text
+
+    dest = tmp_path / "sem_r.xlsx"
+    _xlsx_sem_atributo_r(dest)
+    with zipfile.ZipFile(dest) as z:
+        files = {n: z.read(n) for n in z.namelist()}
+    sheet = files["xl/worksheets/sheet1.xml"].decode()
+    curta = '<x:row><x:c t="n"><x:v>3</x:v></x:c><x:c t="n"><x:v>x</x:v></x:c></x:row>'
+    outra = '<x:row><x:c t="n"><x:v>4</x:v></x:c></x:row>'
+    files["xl/worksheets/sheet1.xml"] = sheet.replace(
+        "</x:sheetData>", curta + outra + "</x:sheetData>"
+    ).encode()
+    with zipfile.ZipFile(dest, "w") as z:
+        for n, b in files.items():
+            z.writestr(n, b)
+    with caplog.at_level("WARNING", logger="loterias_fetcher.lake"):
+        df = read_xlsx_as_text(dest)
+    avisos = [r for r in caplog.records if "sem atributo r" in r.getMessage()]
+    assert len(avisos) == 1  # uma vez por arquivo
+    assert "linha 4 " in avisos[0].getMessage()
+    assert df.height == 4  # o resultado nao muda
+
+
+def test_leitura_sem_atributo_r_consistente_nao_avisa(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    from loterias_fetcher.lake import read_xlsx_as_text
+
+    dest = tmp_path / "sem_r.xlsx"
+    _xlsx_sem_atributo_r(dest)
+    with caplog.at_level("WARNING", logger="loterias_fetcher.lake"):
+        read_xlsx_as_text(dest)
+    assert not [r for r in caplog.records if "sem atributo r" in r.getMessage()]

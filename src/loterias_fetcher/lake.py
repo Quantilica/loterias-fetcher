@@ -123,14 +123,20 @@ def read_xlsx_as_text(file_path: Path) -> pl.DataFrame:
             root = ET.fromstring(zf.read("xl/sharedStrings.xml"))
             shared = [_si_text(si) for si in root.iter(f"{_NS}si")]
         rows: list[dict[int, str | None]] = []
+        header_len: int | None = None
+        warned = False
         with zf.open(_first_sheet_path(zf)) as fh:
             for _, el in ET.iterparse(fh):
                 if el.tag != f"{_NS}row":
                     continue
                 cells: dict[int, str | None] = {}
                 pos = 0  # coluna da proxima celula quando faltar o atributo r
+                sem_r = False
+                n_cells = 0
                 for c in el.findall(f"{_NS}c"):
                     ref = c.get("r")
+                    n_cells += 1
+                    sem_r = sem_r or not ref
                     col = _col_index(ref) if ref else pos
                     pos = col + 1
                     kind = c.get("t")
@@ -145,6 +151,19 @@ def read_xlsx_as_text(file_path: Path) -> pl.DataFrame:
                     else:
                         val = v.text
                     cells[col] = val
+                if header_len is None:
+                    header_len = n_cells
+                elif sem_r and n_cells != header_len and not warned:
+                    # sem o atributo r nao ha como saber qual celula faltou
+                    warned = True
+                    logger.warning(
+                        "LOTERIAS %s: linha %d sem atributo r tem %d celulas e o "
+                        "cabecalho tem %d; colunas lidas pela posicao",
+                        file_path.name,
+                        len(rows) + 1,
+                        n_cells,
+                        header_len,
+                    )
                 rows.append(cells)
                 el.clear()
     if not rows:
@@ -157,7 +176,11 @@ def read_xlsx_as_text(file_path: Path) -> pl.DataFrame:
         seen[h] = seen.get(h, 0) + 1
         names.append(h if seen[h] == 1 else f"{h}_{seen[h]}")
     data = {n: [r.get(i) for r in rows[1:]] for i, n in enumerate(names)}
-    return pl.DataFrame(data, schema={n: pl.Utf8 for n in names})
+    # descarta coluna sem nome no cabecalho e sem nenhum valor (sobra do fallback)
+    for i, n in enumerate(names):
+        if not (rows[0].get(i) or "").strip() and all(v is None for v in data[n]):
+            del data[n]
+    return pl.DataFrame(data, schema={n: pl.Utf8 for n in data})
 
 
 def _read_excel_tolerant(file_path: Path) -> pl.DataFrame:
