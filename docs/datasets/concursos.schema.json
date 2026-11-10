@@ -1,7 +1,7 @@
 {
   "fonte": "loterias",
   "dataset": "concursos",
-  "gerado_em": "2026-11-09T13:56:45+00:00",
+  "gerado_em": "2026-11-10T00:53:59+00:00",
   "particoes": [
     "modalidade"
   ],
@@ -40,7 +40,6 @@
     {
       "nome": "valor_acumulado",
       "tipos": [
-        "double",
         "null"
       ]
     },
