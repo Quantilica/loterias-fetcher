@@ -9,6 +9,7 @@ from typing import Any
 
 from quantilica.cli.sdk import FetcherApp, make_resolve_groups
 from quantilica.core.logging import get_logger
+from quantilica.core.registry import FetcherInfo
 from quantilica.core.sync import FreshnessPolicy
 
 from .catalog import GROUP_ALIASES, GROUPS, list_datasets
@@ -33,6 +34,13 @@ def path_builder(
 fetcher = FetcherApp(
     name="loterias",
     help="Resultados históricos e rateio das Loterias da Caixa Econômica Federal.",
+    info=FetcherInfo(
+        id="loterias",
+        nome="Loterias CAIXA",
+        orgao="Caixa Econômica Federal",
+        homepage="https://loterias.caixa.gov.br",
+        cadencia="irregular",
+    ),
     groups_dict=GROUPS,
     aliases_dict=GROUP_ALIASES,
     list_datasets=list_datasets,
