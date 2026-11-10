@@ -10,6 +10,9 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 ### Adicionado
 - Documentação dos dados em `docs/`, conforme a norma de documentação dos dados: página, dicionário de todas as variáveis e esquema de referência para cada um dos três datasets. Um teste a verifica.
 
+### Corrigido
+- A Lotomania saía sem nenhuma linha na conversão para o lake. A planilha da Caixa não traz o atributo `r` (referência da célula) e, ao reler o arquivo como texto, todas as células iam para a primeira coluna. Agora, sem `r`, a coluna é a posição da célula na linha. Exige reconversão da Lotomania para recuperar os concursos. As demais modalidades não mudam.
+
 ## [0.2.2] - 2026-11-06
 
 ### Corrigido

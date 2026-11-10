@@ -228,3 +228,46 @@ def test_leitura_como_texto_preserva_celulas_e_cabecalho(tmp_path: Path) -> None
     assert df["Concurso"].to_list() == [str(v) for v in ref["Concurso"]]
     assert df["Bola1"][0] == "01"  # texto preservado (zero à esquerda)
     assert df["Arrecadacao Total"].to_list()[:2] == ["1.234,56", None]
+
+
+def _xlsx_sem_atributo_r(dest: Path) -> None:
+    """XLSX minimo no estilo da Caixa: prefixo ``x:`` e celulas sem o atributo ``r``."""
+    ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    rel_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+    def row(vals: list[str], tipo: str = "n") -> str:
+        cells = "".join(f'<x:c t="{tipo}"><x:v>{v}</x:v></x:c>' for v in vals)
+        return f"<x:row>{cells}</x:row>"
+
+    header = row(["Concurso", "Data Sorteio", "Bola1", "Bola2"], "str")
+    body = row(["1", "02/10/1999", "01", "02"]) + row(["2", "09/10/1999", "03", "04"])
+    sheet = (
+        f'<x:worksheet xmlns:x="{ns}"><x:sheetData>{header}{body}</x:sheetData>'
+        "</x:worksheet>"
+    )
+    wb = (
+        f'<x:workbook xmlns:x="{ns}" xmlns:r="{rel_ns}"><x:sheets>'
+        '<x:sheet name="P" sheetId="1" r:id="rId1"/></x:sheets></x:workbook>'
+    )
+    rels = (
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/'
+        'relationships"><Relationship Id="rId1" Type="worksheet" '
+        'Target="worksheets/sheet1.xml"/></Relationships>'
+    )
+    with zipfile.ZipFile(dest, "w") as z:
+        z.writestr("xl/workbook.xml", wb)
+        z.writestr("xl/_rels/workbook.xml.rels", rels)
+        z.writestr("xl/worksheets/sheet1.xml", sheet)
+
+
+def test_leitura_como_texto_sem_atributo_r_usa_a_posicao(tmp_path: Path) -> None:
+    from loterias_fetcher.lake import read_xlsx_as_text
+
+    dest = tmp_path / "sem_r.xlsx"
+    _xlsx_sem_atributo_r(dest)
+    df = read_xlsx_as_text(dest)
+    assert df.columns == ["Concurso", "Data Sorteio", "Bola1", "Bola2"]
+    assert df.height == 2
+    assert df["Concurso"].to_list() == ["1", "2"]
+    assert df["Bola1"].to_list() == ["01", "03"]
+    assert df["Bola2"].to_list() == ["02", "04"]

@@ -113,6 +113,8 @@ def read_xlsx_as_text(file_path: Path) -> pl.DataFrame:
     exemplo, celula numerica com ``1.234,56`` ou conteudo nao numerico: ``Parse
     float error: invalid float literal``). O conteudo da celula vai como esta no
     XML, sem converter nada; a regra de conversao fica em ``parse_xlsx_concursos``.
+    Com o atributo ``r`` a coluna vem dele (celulas vazias omitidas); sem ele, a
+    coluna e a posicao da celula na linha (assim sao as planilhas da Caixa).
     A primeira linha e o cabecalho; nenhuma linha de dados e descartada.
     """
     with zipfile.ZipFile(file_path) as zf:
@@ -126,7 +128,11 @@ def read_xlsx_as_text(file_path: Path) -> pl.DataFrame:
                 if el.tag != f"{_NS}row":
                     continue
                 cells: dict[int, str | None] = {}
+                pos = 0  # coluna da proxima celula quando faltar o atributo r
                 for c in el.findall(f"{_NS}c"):
+                    ref = c.get("r")
+                    col = _col_index(ref) if ref else pos
+                    pos = col + 1
                     kind = c.get("t")
                     v = c.find(f"{_NS}v")
                     if kind == "inlineStr":
@@ -138,7 +144,7 @@ def read_xlsx_as_text(file_path: Path) -> pl.DataFrame:
                         val = shared[int(v.text)]
                     else:
                         val = v.text
-                    cells[_col_index(c.get("r") or "A1")] = val
+                    cells[col] = val
                 rows.append(cells)
                 el.clear()
     if not rows:
