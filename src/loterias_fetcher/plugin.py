@@ -38,6 +38,10 @@ fetcher = FetcherApp(
         id="loterias",
         nome="Loterias CAIXA",
         orgao="Caixa Econômica Federal",
+        licenca=(
+            "Sem licença declarada; dados públicos pela Lei 12.527/2011 (LAI) "
+            "e Decreto 8.777/2016"
+        ),
         homepage="https://loterias.caixa.gov.br",
         cadencia="irregular",
     ),
