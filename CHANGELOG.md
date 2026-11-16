@@ -9,8 +9,14 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ### Adicionado
 - Testes: identidade do registro conferida.
+- Testes com servidor falso que recusa com `429` (com e sem `Retry-After`): as 22 entradas do catálogo terminam, as requisições simultâneas e o espaçamento respeitam a política e o `429` pausa o host inteiro.
+
+### Alterado
+- Requer `quantilica-core>=0.23.0` (política por host com token bucket e pausa no `429`).
+- Política de tráfego da API da Caixa (`host_policy`): uma requisição a cada 2 s por host, sem rajada, no máximo 2 simultâneas e, num `429`, pausa do host inteiro pelo `Retry-After` do servidor ou, sem ele, por 10 s dobrando a cada `429` seguido.
 
 ### Corrigido
+- A coleta (`sync`/`pipeline`) deixa de falhar com `HTTP 429` em algumas modalidades: o download da CLI usava um cliente por thread, sem a política por host, e a API recebia as requisições em paralelo. Agora todas as threads compartilham um único cliente com a política, e o número de threads respeita o `max_concurrency` do host.
 - CI: o pyproject declara o PyPI antes do índice Quantilica (`[[tool.uv.index]]`), e o workflow perde `--index` e `--index-strategy`. Com a estratégia padrão `first-index`, o `uv sync` só consulta o índice para o que não está no PyPI (`quantilica-analytics`) e deixa de receber o 503 intermitente que o GitHub Pages devolve a caminhos inexistentes.
 
 ## [0.3.0] - 2026-11-14

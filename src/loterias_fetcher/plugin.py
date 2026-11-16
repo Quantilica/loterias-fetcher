@@ -54,6 +54,24 @@ class LoteriasFetcherApp(FetcherApp):
     ``HostPolicy`` de :mod:`loterias_fetcher.client`) valem para o conjunto.
     """
 
+    @staticmethod
+    def _limit_workers(
+        client: HttpClient, entries: list[dict[str, Any]], workers: int
+    ) -> int:
+        """Limita as threads ao ``max_concurrency`` dos hosts das entradas.
+
+        O ``HttpClient`` aplica ``max_concurrency`` nas chamadas ``request``
+        (``HEAD``/``GET`` simples), mas não em ``stream`` (o download do
+        arquivo). Como cada thread tem no máximo uma requisição em curso,
+        limitar as threads garante o teto também no download.
+        """
+        caps = []
+        for entry in entries:
+            policy = client._policy_for(str(entry["url"]))
+            if policy is not None and policy.max_concurrency > 0:
+                caps.append(policy.max_concurrency)
+        return max(1, min([workers, *caps]))
+
     def download_datasets(
         self,
         entries: list[dict[str, Any]],
@@ -74,6 +92,12 @@ class LoteriasFetcherApp(FetcherApp):
             tuple[int, int, list[tuple[str, str]]]: Baixadas, total e a lista
             ``(id, mensagem)`` das que falharam.
         """
+        client = self.client
+        if not isinstance(client, HttpClient):
+            raise TypeError(
+                "loterias exige um HttpClient, não " + type(client).__name__
+            )
+        workers = self._limit_workers(client, entries, workers)
         console = get_console()
         total = len(entries)
         overall = make_batch_progress(console)
@@ -93,7 +117,12 @@ class LoteriasFetcherApp(FetcherApp):
                 errors.append((eid, str(exc)))
                 return False
 
-        with self.client:  # conexões persistentes, compartilhadas
+        client = self.client
+        if not isinstance(client, HttpClient):
+            raise TypeError(
+                "loterias exige um HttpClient, não " + type(client).__name__
+            )
+        with client:  # conexões persistentes, compartilhadas
             with graceful_executor(max_workers=workers) as executor:
                 try:
                     with Live(
