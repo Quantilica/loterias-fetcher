@@ -7,6 +7,8 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ## [Não lançado]
 
+
+## [0.3.1] - 2026-11-15
 ### Adicionado
 - Testes: identidade do registro conferida.
 - Testes com servidor falso que recusa com `429` (com e sem `Retry-After`): as 22 entradas do catálogo terminam, as requisições simultâneas e o espaçamento respeitam a política e o `429` pausa o host inteiro.
