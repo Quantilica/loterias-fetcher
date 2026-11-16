@@ -12,17 +12,65 @@ from .constants import DEFAULT_API_HOST, MODALIDADES, PARAMS_URL
 
 logger = get_logger(__name__)
 
+API_HOSTS: tuple[str, ...] = (
+    "servicebus3.caixa.gov.br",
+    "servicebus2.caixa.gov.br",
+    "loterias.caixa.gov.br",
+)
+"""Hosts da Caixa que respondem pelos dados das loterias."""
+
+
+def host_policy(
+    *,
+    min_interval: float = 2.0,
+    max_concurrency: int = 2,
+    backoff_base: float = 10.0,
+) -> HostPolicy:
+    """Política de tráfego por host para a API da Caixa.
+
+    A API recusa com ``429`` quem pede depressa demais. A política espaça as
+    requisições (uma a cada ``min_interval`` segundos, sem rajada), limita as
+    simultâneas e, ao primeiro ``429``, pausa o host inteiro: todas as threads
+    esperam o ``Retry-After`` do servidor ou, sem ele, ``backoff_base``
+    segundos dobrando a cada ``429`` seguido.
+
+    Args:
+        min_interval: Segundos entre requisições ao mesmo host.
+        max_concurrency: Requisições simultâneas ao mesmo host.
+        backoff_base: Primeira pausa do host (s) num ``429`` sem ``Retry-After``.
+
+    Returns:
+        HostPolicy: A política, para ``HttpClient(host_policies=...)``.
+    """
+    return HostPolicy(
+        min_interval=min_interval,
+        max_concurrency=max_concurrency,
+        burst=1,
+        backoff_base=backoff_base,
+    )
+
+
+def host_policies(
+    hosts: tuple[str, ...] = API_HOSTS, policy: HostPolicy | None = None
+) -> dict[str, HostPolicy]:
+    """Mapa host -> política, a mesma para todos os ``hosts``.
+
+    Args:
+        hosts: Hosts a proteger (padrão: os da API da Caixa).
+        policy: Política a aplicar (padrão: :func:`host_policy`).
+
+    Returns:
+        dict[str, HostPolicy]: Política por host.
+    """
+    chosen = policy or host_policy()
+    return dict.fromkeys(hosts, chosen)
+
 
 class LoteriasClient:
     """Client for Caixa Loterias services."""
 
     def __init__(self, client: HttpClient | None = None) -> None:
-        host_policies = {
-            "servicebus3.caixa.gov.br": HostPolicy(min_interval=1.0),
-            "servicebus2.caixa.gov.br": HostPolicy(min_interval=1.0),
-            "loterias.caixa.gov.br": HostPolicy(min_interval=1.0),
-        }
-        self.client = client or HttpClient(host_policies=host_policies)
+        self.client = client or HttpClient(host_policies=host_policies())
         self._api_host: str | None = None
 
     def resolve_api_host(self) -> str:
