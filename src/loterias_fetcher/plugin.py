@@ -215,14 +215,20 @@ def _get_backfill_units() -> list[str]:
     return units
 
 
+def _default_data_dir() -> Path:
+    """Padrão XDG quando ``DATA_DIR`` não está definido."""
+    xdg = os.environ.get("XDG_DATA_HOME")
+    base = Path(xdg).expanduser() if xdg else Path.home() / ".local" / "share"
+    return base / "quantilica"
+
+
 def _run_backfill_unit(unit: str, output_dir: Path | None = None) -> None:
     """Download single contest JSON with manifest sidecar."""
     client = LoteriasClient()
     slug, contest_s = unit.split(":", 1)
     contest_num = int(contest_s)
-    base_dir = output_dir or (
-        Path(os.environ.get("DATA_DIR", "~/data")).expanduser() / "loterias"
-    )
+    raiz = Path(os.environ.get("DATA_DIR") or _default_data_dir()).expanduser()
+    base_dir = output_dir or (raiz / "loterias")
     out_dir = base_dir / "detalhe"
     out_dir.mkdir(parents=True, exist_ok=True)
     today = dt.date.today().strftime("%Y%m%d")

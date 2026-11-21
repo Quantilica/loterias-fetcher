@@ -9,6 +9,7 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ### Alterado
 - CI e infraestrutura alinhados ao template (fetcher-template v0.2.1).
+- Sem `DATA_DIR`, o diretório de dados deixa de ser `~/data` e passa a ser `$XDG_DATA_HOME/quantilica` (ou `~/.local/share/quantilica`). Quem define `DATA_DIR` não muda de caminho.
 
 ## [0.3.1] - 2026-11-15
 ### Adicionado
