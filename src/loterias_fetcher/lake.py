@@ -523,9 +523,12 @@ class LoteriasLakeConverter:
                         res.errors.append(f"Erro em detalhe {jf.name}: {exc}")
                         continue
                     for ds_name, writer, schema, idx in pending:
+                        # Sem linhas (concurso sem ganhador por municipio, por exemplo)
+                        # o membro vai vazio, com o esquema: e ele que registra a
+                        # origem vigente e tira do grupo as linhas da versao anterior
+                        # do mesmo arquivo; sem ele o lake guardaria o membro antigo,
+                        # com a origem superada.
                         rows = parsed[idx]
-                        if not rows:
-                            continue
                         try:
                             written = writer.write_member(
                                 pl.DataFrame(rows, schema=schema, strict=False),
