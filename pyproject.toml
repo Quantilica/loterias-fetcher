@@ -1,6 +1,6 @@
 [project]
 name = "loterias-fetcher"
-version = "0.3.1"
+version = "0.3.2"
 description = "Coletor e conversor Lake Hive de dados das Loterias da Caixa Econômica Federal"
 readme = "README.md"
 authors = [

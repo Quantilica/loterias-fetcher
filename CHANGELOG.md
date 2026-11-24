@@ -5,7 +5,11 @@ Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/),
 e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
-## [Não lançado]
+## [0.3.2] - 2026-11-24
+
+### Corrigido
+
+- **Detalhe do concurso sem linhas num dataset grava o membro vazio.** O detalhe de cada modalidade é um arquivo só (o concurso mais recente) e a versão nova substitui a anterior. Quando o concurso não teve ganhador por município (`listaMunicipioUFGanhadores` vazia), o conversor não gravava o membro de `ganhadores_municipio` e o grupo ficava com o da versão anterior, cuja origem já não era a vigente (`origem_superada` na auditoria, em `duplasena`, `megasena` e `supersete`). O membro agora vai vazio, com o esquema, e tira do grupo as linhas da versão anterior. Vale também para `rateio`. Como consequência, toda modalidade passa a ter o Parquet agrupado dos dois datasets, mesmo sem linhas.
 
 ### Alterado
 - CI e infraestrutura alinhados ao template (fetcher-template v0.2.1).
