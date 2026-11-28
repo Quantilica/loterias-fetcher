@@ -7,9 +7,11 @@ import datetime as dt
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import typer
 from quantilica.cli.sdk import FetcherApp, default_client, make_resolve_groups
+from quantilica.cli.summary import DownloadStats
 from quantilica.cli.ui import (
     ProgressPool,
     get_console,
@@ -25,8 +27,8 @@ from rich.console import Group
 from rich.live import Live
 
 from .catalog import GROUP_ALIASES, GROUPS, list_datasets
-from .client import LoteriasClient, host_policies
-from .constants import MODALIDADES
+from .client import LoteriasClient, host_policies, host_policy
+from .constants import DEFAULT_API_HOST, MODALIDADES
 from .storage import DataRepository
 
 logger = get_logger(__name__)
@@ -72,6 +74,31 @@ class LoteriasFetcherApp(FetcherApp):
                 caps.append(policy.max_concurrency)
         return max(1, min([workers, *caps]))
 
+    def _entries_com_host_resolvido(
+        self, client: HttpClient, entries: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Troca o host fixo do catálogo pelo que a Caixa publica em ``params.txt``.
+
+        O catálogo grava ``DEFAULT_API_HOST`` em todas as URLs; a Caixa já mudou de
+        host mais de uma vez. Uma única leitura do ``params.txt`` por execução; se
+        ela falhar, vale o host fixo (e :meth:`LoteriasClient.resolve_api_host`
+        registra o aviso). O host resolvido entra na política de tráfego se ainda
+        não estiver nela.
+        """
+        host = LoteriasClient(client).resolve_api_host()
+        if host == DEFAULT_API_HOST:
+            return entries
+        logger.info("Host da API pelo params.txt: %s", host)
+        netloc = urlsplit(host).hostname
+        if netloc and netloc not in client.host_policies:
+            client.host_policies[netloc] = host_policy()
+        return [
+            {**e, "url": host + str(e["url"])[len(DEFAULT_API_HOST) :]}
+            if str(e.get("url", "")).startswith(DEFAULT_API_HOST)
+            else e
+            for e in entries
+        ]
+
     def download_datasets(
         self,
         entries: list[dict[str, Any]],
@@ -81,6 +108,10 @@ class LoteriasFetcherApp(FetcherApp):
         force: bool = False,
     ) -> tuple[int, int, list[tuple[str, str]]]:
         """Baixa as entradas em paralelo, todas pelo mesmo cliente.
+
+        Os contadores ficam em ``last_download_stats`` (o ``--summary-json`` do
+        ``sync`` os lê) e as URLs usam o host que a Caixa publica no
+        ``params.txt``, com o fixo como reserva.
 
         Args:
             entries: Entradas do catálogo a baixar.
@@ -97,32 +128,35 @@ class LoteriasFetcherApp(FetcherApp):
             raise TypeError(
                 "loterias exige um HttpClient, não " + type(client).__name__
             )
-        workers = self._limit_workers(client, entries, workers)
         console = get_console()
         total = len(entries)
-        overall = make_batch_progress(console)
-        file_prog = make_download_progress(console)
-        overall_task = overall.add_task("[cyan]Baixando...[/cyan]", total=total)
-        pool = ProgressPool(workers=workers, file_prog=file_prog)
+        stats = self.last_download_stats = DownloadStats()
         downloaded = 0
         errors: list[tuple[str, str]] = []
 
-        def _worker(entry: dict[str, Any]) -> bool:
-            eid = entry.get("id", "unknown")
-            try:
-                with pool.acquire(description=f"[cyan]{eid}[/cyan]") as cb:
-                    self.download_entry(entry, output_dir, progress=cb, force=force)
-                return True
-            except Exception as exc:  # noqa: BLE001 - vira linha do relatório
-                errors.append((eid, str(exc)))
-                return False
-
-        client = self.client
-        if not isinstance(client, HttpClient):
-            raise TypeError(
-                "loterias exige um HttpClient, não " + type(client).__name__
-            )
         with client:  # conexões persistentes, compartilhadas
+            entries = self._entries_com_host_resolvido(client, entries)
+            workers = self._limit_workers(client, entries, workers)
+            overall = make_batch_progress(console)
+            file_prog = make_download_progress(console)
+            overall_task = overall.add_task("[cyan]Baixando...[/cyan]", total=total)
+            pool = ProgressPool(workers=workers, file_prog=file_prog)
+
+            def _worker(entry: dict[str, Any]) -> bool:
+                eid = entry.get("id", "unknown")
+                try:
+                    with pool.acquire(description=f"[cyan]{eid}[/cyan]") as cb:
+                        measured = stats.track().forwarding(cb)
+                        self.download_entry(
+                            entry, output_dir, progress=measured, force=force
+                        )
+                        stats.succeeded(measured)
+                    return True
+                except Exception as exc:  # noqa: BLE001 - vira linha do relatório
+                    stats.failed()
+                    errors.append((eid, str(exc)))
+                    return False
+
             with graceful_executor(max_workers=workers) as executor:
                 try:
                     with Live(
@@ -195,23 +229,45 @@ fetcher.command_pipeline(convert)
 
 
 # Register backfill subcommand (P5)
+LATEST_UNIT = "ultimo"
+"""Sufixo da unidade que marca uma modalidade cujo último concurso não veio."""
+
+_backfill_client: LoteriasClient | None = None
+_backfill_failures: dict[str, str] = {}
+
+
+def _get_backfill_client(*, new: bool = False) -> LoteriasClient:
+    """Cliente único da execução do backfill (o ``params.txt`` é lido uma vez)."""
+    global _backfill_client
+    if _backfill_client is None or new:
+        _backfill_client = LoteriasClient(build_client())
+    return _backfill_client
+
+
 def _get_backfill_units() -> list[str]:
-    """Return units for backfill: list of all contest keys (e.g. megasena:3000)."""
-    client = LoteriasClient()
+    """Return units for backfill: list of all contest keys (e.g. megasena:3000).
+
+    Modalidade sem o último concurso (falha da API ou resposta sem o número) não
+    é ignorada em silêncio: entra como a unidade ``<slug>:ultimo``, que falha ao
+    rodar e faz o ``backfill`` terminar com erro.
+    """
+    client = _get_backfill_client(new=True)
+    _backfill_failures.clear()
     units: list[str] = []
     for slug in MODALIDADES:
         try:
             latest = client.get_contest(slug)
             num = latest.get("numero") or latest.get("concurso")
-            if num:
-                for c in range(1, int(num) + 1):
-                    units.append(f"{slug}:{c}")
+            if not num:
+                raise ValueError("resposta sem o número do concurso")
+            for c in range(1, int(num) + 1):
+                units.append(f"{slug}:{c}")
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "Backfill: modalidade %s ignorada (último concurso indisponível): %s",
-                slug,
-                exc,
+                "Backfill: modalidade %s sem o último concurso: %s", slug, exc
             )
+            _backfill_failures[slug] = str(exc)
+            units.append(f"{slug}:{LATEST_UNIT}")
     return units
 
 
@@ -224,8 +280,11 @@ def _default_data_dir() -> Path:
 
 def _run_backfill_unit(unit: str, output_dir: Path | None = None) -> None:
     """Download single contest JSON with manifest sidecar."""
-    client = LoteriasClient()
     slug, contest_s = unit.split(":", 1)
+    if contest_s == LATEST_UNIT:
+        cause = _backfill_failures.get(slug, "causa não registrada")
+        raise RuntimeError(f"último concurso de {slug} indisponível: {cause}")
+    client = _get_backfill_client()
     contest_num = int(contest_s)
     raiz = Path(os.environ.get("DATA_DIR") or _default_data_dir()).expanduser()
     base_dir = output_dir or (raiz / "loterias")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+SOURCE_ID = "loterias"
 PARAMS_URL = "https://loterias.caixa.gov.br/Style%20Library/json/params.txt"
 DEFAULT_API_HOST = "https://servicebus3.caixa.gov.br/portaldeloterias"
 

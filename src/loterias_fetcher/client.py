@@ -8,7 +8,7 @@ from typing import Any
 from quantilica.core.http import HostPolicy, HttpClient
 from quantilica.core.logging import get_logger
 
-from .constants import DEFAULT_API_HOST, MODALIDADES, PARAMS_URL
+from .constants import DEFAULT_API_HOST, MODALIDADES, PARAMS_URL, SOURCE_ID
 
 logger = get_logger(__name__)
 
@@ -78,23 +78,31 @@ class LoteriasClient:
         if self._api_host is not None:
             return self._api_host
 
+        reason = ""
         try:
-            resp = self.client.get(PARAMS_URL, timeout=10.0)
+            resp = self.client.get(PARAMS_URL)
             if resp.status_code == 200:
                 data = resp.json()
-                if isinstance(data, dict) and "urlapiloterias" in data:
-                    host = data["urlapiloterias"].rstrip("/")
-                    if host:
-                        self._api_host = host
-                        return host
+                host = (
+                    str(data.get("urlapiloterias") or "").rstrip("/")
+                    if isinstance(data, dict)
+                    else ""
+                )
+                if host:
+                    self._api_host = host
+                    return host
+                reason = "resposta sem 'urlapiloterias'"
+            else:
+                reason = f"HTTP {resp.status_code}"
         except Exception as exc:  # noqa: BLE001 - cai no host padrão, mas avisa
-            logger.warning(
-                "Falha ao ler %s (%s); usando o host padrão %s",
-                PARAMS_URL,
-                exc,
-                DEFAULT_API_HOST,
-            )
+            reason = str(exc)
 
+        logger.warning(
+            "Falha ao ler %s (%s); usando o host padrão %s",
+            PARAMS_URL,
+            reason,
+            DEFAULT_API_HOST,
+        )
         self._api_host = DEFAULT_API_HOST
         return self._api_host
 
@@ -129,11 +137,29 @@ class LoteriasClient:
     def download_xlsx(self, modalidade_slug: str, destination: Path) -> Path:
         """Download XLSX with manifest sidecar."""
         url = self.download_url_for_modalidade(modalidade_slug)
-        return self.client.download_with_manifest(url, destination)
+        return self.client.download_with_manifest(
+            url,
+            destination,
+            source_id=SOURCE_ID,
+            dataset_id="concursos",
+            producer=SOURCE_ID,
+            expected_format="xlsx",
+        )
 
     def download_contest(
         self, modalidade_slug: str, contest_number: int | None, destination: Path
     ) -> Path:
-        """Download contest JSON with manifest sidecar."""
+        """Download contest JSON with manifest sidecar.
+
+        O payload é validado como JSON antes de gravar: uma página HTML com
+        ``200`` (manutenção, bloqueio) não vira um ``.json``.
+        """
         url = self.contest_url(modalidade_slug, contest_number)
-        return self.client.download_with_manifest(url, destination)
+        return self.client.download_with_manifest(
+            url,
+            destination,
+            source_id=SOURCE_ID,
+            dataset_id="detalhe",
+            producer=SOURCE_ID,
+            expected_format="json",
+        )
