@@ -276,3 +276,27 @@ def test_acervo_so_com_concursos_converte_sem_erro(tmp_path: Path) -> None:
     _concursos(raw, HEADER, [["1", "01/01/2026", "1", "2"]])
     res = converter.convert(raw, tmp_path / "lake")
     assert res.errors == [] and res.converted == 1
+
+
+def test_manifesto_lateral_e_ignorado_em_silencio(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    raw, lk = tmp_path / "raw", tmp_path / "lake"
+    jf = _json(
+        _mk(raw / "detalhe"),
+        {"numero": 3000, "listaRateioPremio": [{"faixa": 1, "valorPremio": 1.5}]},
+    )
+    jf = jf.rename(jf.with_name("megasena@20261101.json"))
+    Path(f"{jf}.manifest.json").write_text("{}", encoding="utf-8")
+    xlsx = _xlsx(
+        raw / "concursos" / "megasena@20261101.xlsx",
+        HEADER,
+        [["1", "01/01/2026", "1", "2"]],
+    )
+    Path(f"{xlsx}.manifest.json").write_text("{}", encoding="utf-8")
+    with caplog.at_level(logging.WARNING):
+        res = converter.convert(raw, lk)
+    assert res.errors == []
+    assert "desconhecida" not in caplog.text
+    assert res.converted == 3  # concursos + rateio + ganhadores_municipio
+    assert _parquets(lk, "rateio").height == 1

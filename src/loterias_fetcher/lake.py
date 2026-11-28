@@ -35,6 +35,9 @@ logger = logging.getLogger(__name__)
 SOURCE_ID = "loterias"
 DATASETS = ["concursos", "rateio", "ganhadores_municipio"]
 
+MANIFEST_SUFFIX = ".manifest.json"
+"""Sufixo do manifesto lateral que acompanha cada arquivo bruto no acervo."""
+
 CONCURSO_COLUMNS = ("concurso", "extracao")
 """Nomes (normalizados) da coluna do número do concurso; a Loteria Federal
 publica o número na coluna ``Extração``."""
@@ -606,7 +609,14 @@ class LoteriasLakeConverter:
             )
 
             # Group JSON files by modalidade
-            json_files = select_current(list(detalhe_dir.glob("*.json")))
+            # ``x.json.manifest.json`` é o manifesto lateral do acervo, não um JSON
+            json_files = select_current(
+                [
+                    f
+                    for f in detalhe_dir.glob("*.json")
+                    if not f.name.endswith(MANIFEST_SUFFIX)
+                ]
+            )
             files_by_mod: dict[str, list[Path]] = {}
             for jf in json_files:
                 # Format: {mod}_{concurso}@{stamp}.json
