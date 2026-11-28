@@ -300,3 +300,29 @@ def test_manifesto_lateral_e_ignorado_em_silencio(
     assert "desconhecida" not in caplog.text
     assert res.converted == 3  # concursos + rateio + ganhadores_municipio
     assert _parquets(lk, "rateio").height == 1
+
+
+def test_detalhe_numero_vazio_ou_so_espacos_vira_nulo(tmp_path: Path) -> None:
+    payload = {
+        "numero": 3000,
+        "listaRateioPremio": [
+            {
+                "faixa": "",
+                "descricaoFaixa": "6 acertos",
+                "numeroDeGanhadores": "",
+                "valorPremio": "  ",
+            },
+            {"faixa": "", "ordem": 2, "numeroDeGanhadores": "3", "valorPremio": "1.5"},
+        ],
+        "listaMunicipioUFGanhadores": [
+            {"posicao": 1, "municipio": "X", "uf": "SP", "ganhadores": ""},
+            {"posicao": 2, "ganhadores": " ", "numeroDeGanhadores": 4},
+        ],
+    }
+    rateio, ganh = parse_json_detalhe(_json(tmp_path, payload), "megasena")
+    assert rateio[0]["faixa"] is None
+    assert rateio[0]["ganhadores"] is None and rateio[0]["valor_premio"] is None
+    assert rateio[1]["faixa"] == 2  # "" cai para ``ordem``
+    assert rateio[1]["ganhadores"] == 3 and rateio[1]["valor_premio"] == 1.5
+    assert ganh[0]["ganhadores"] is None
+    assert ganh[1]["ganhadores"] == 4

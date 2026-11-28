@@ -396,19 +396,24 @@ def parse_xlsx_concursos(
     return pl.DataFrame(rows)
 
 
+def _is_absent(value: Any) -> bool:
+    """Ausente: ``None`` ou texto vazio/só espaços (zero é um valor, não ausência)."""
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
 def _opt_int(value: Any) -> int | None:
-    """``int`` do valor, ou ``None`` se ausente (zero é um valor, não ausência)."""
-    return None if value is None else int(value)
+    """``int`` do valor, ou ``None`` se ausente (inclusive ``""``)."""
+    return None if _is_absent(value) else int(value)
 
 
 def _opt_float(value: Any) -> float | None:
-    return None if value is None else float(value)
+    return None if _is_absent(value) else float(value)
 
 
 def _first_present(item: dict[str, Any], *keys: str) -> Any:
-    """Primeiro valor não nulo entre ``keys`` (``0`` conta como presente)."""
+    """Primeiro valor presente entre ``keys`` (``0`` conta como presente)."""
     for key in keys:
-        if item.get(key) is not None:
+        if not _is_absent(item.get(key)):
             return item[key]
     return None
 
