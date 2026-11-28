@@ -35,6 +35,19 @@ logger = logging.getLogger(__name__)
 SOURCE_ID = "loterias"
 DATASETS = ["concursos", "rateio", "ganhadores_municipio"]
 
+CONCURSO_COLUMNS = ("concurso", "extracao")
+"""Nomes (normalizados) da coluna do número do concurso; a Loteria Federal
+publica o número na coluna ``Extração``."""
+
+MODALIDADES_SEM_DEZENAS = frozenset({"federal", "loteca"})
+"""Modalidades cuja planilha não tem colunas de bolas: a Federal publica
+bilhetes nas colunas de prêmio e a Loteca, resultados de jogos. Nelas
+``dezenas`` fica vazio; nas demais, sem colunas de bolas, o arquivo é erro."""
+
+MAX_DISCARDED_FRACTION = 0.01
+"""Fração máxima de linhas do XLSX que podem ser descartadas por número de
+concurso ilegível; acima disso o arquivo inteiro é erro (nada é gravado)."""
+
 
 RATEIO_SCHEMA: dict[str, Any] = {
     "modalidade": pl.Utf8,
@@ -199,8 +212,26 @@ def _read_excel_tolerant(file_path: Path) -> pl.DataFrame:
             raise exc from fallback_exc
 
 
-def parse_xlsx_concursos(file_path: Path, modalidade: str) -> pl.DataFrame:
-    """Parse a Caixa XLSX file into standardized concursos records."""
+def parse_xlsx_concursos(
+    file_path: Path,
+    modalidade: str,
+    *,
+    discarded: list[str] | None = None,
+) -> pl.DataFrame:
+    """Parse a Caixa XLSX file into standardized concursos records.
+
+    Raises ``ValueError`` quando o arquivo não tem a coluna do concurso ou, fora
+    de :data:`MODALIDADES_SEM_DEZENAS`, as colunas das bolas (a mensagem lista as
+    colunas encontradas): gravar com a primeira coluna no lugar do concurso ou
+    com ``dezenas`` vazia seria dado errado sem aviso.
+
+    Args:
+        file_path: XLSX da modalidade.
+        modalidade: Slug da modalidade.
+        discarded: Se informada, recebe uma descrição (``linha N: valor``) de cada
+            linha descartada por número de concurso ilegível, para quem chama
+            contar e decidir; as linhas totalmente vazias não entram.
+    """
     df_raw = _read_excel_tolerant(file_path)
     if df_raw.height == 0:
         return pl.DataFrame(
@@ -219,9 +250,14 @@ def parse_xlsx_concursos(file_path: Path, modalidade: str) -> pl.DataFrame:
     cols_map = {_norm_col(c): c for c in df_raw.columns}
 
     # Find concurso col
-    concurso_col = next((cols_map[c] for c in cols_map if c == "concurso"), None)
+    concurso_col = next(
+        (cols_map[name] for name in CONCURSO_COLUMNS if name in cols_map), None
+    )
     if concurso_col is None:
-        concurso_col = df_raw.columns[0]
+        raise ValueError(
+            f"{file_path.name}: coluna 'Concurso' (ou 'Extração') não encontrada; "
+            f"colunas do arquivo: {df_raw.columns}"
+        )
 
     # Find data col
     data_col = next(
@@ -241,6 +277,11 @@ def parse_xlsx_concursos(file_path: Path, modalidade: str) -> pl.DataFrame:
             for c in df_raw.columns
             if re.match(r"^(?:bola|coluna)?\s*\d+$", c.strip(), re.I)
         ]
+    if not dezena_cols and modalidade not in MODALIDADES_SEM_DEZENAS:
+        raise ValueError(
+            f"{file_path.name}: colunas das bolas não encontradas; "
+            f"colunas do arquivo: {df_raw.columns}"
+        )
 
     # Arrecadação
     arrecadacao_col = next(
@@ -275,13 +316,20 @@ def parse_xlsx_concursos(file_path: Path, modalidade: str) -> pl.DataFrame:
     )
 
     rows = []
-    for row in df_raw.iter_rows(named=True):
+    for line, row in enumerate(df_raw.iter_rows(named=True), start=2):
         c_val = row.get(concurso_col)
         if c_val is None or str(c_val).strip() == "":
+            # linha sem número: só é descarte "silencioso" se estiver toda vazia
+            if discarded is not None and any(
+                v is not None and str(v).strip() != "" for v in row.values()
+            ):
+                discarded.append(f"linha {line}: concurso vazio")
             continue
         try:
             concurso_num = int(float(str(c_val).replace(".", "").replace(",", ".")))
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, OverflowError):
+            if discarded is not None:
+                discarded.append(f"linha {line}: concurso {str(c_val).strip()!r}")
             continue
 
         d_val = _clean_str(row.get(data_col) if data_col else "")
@@ -345,6 +393,30 @@ def parse_xlsx_concursos(file_path: Path, modalidade: str) -> pl.DataFrame:
     return pl.DataFrame(rows)
 
 
+def _opt_int(value: Any) -> int | None:
+    """``int`` do valor, ou ``None`` se ausente (zero é um valor, não ausência)."""
+    return None if value is None else int(value)
+
+
+def _opt_float(value: Any) -> float | None:
+    return None if value is None else float(value)
+
+
+def _first_present(item: dict[str, Any], *keys: str) -> Any:
+    """Primeiro valor não nulo entre ``keys`` (``0`` conta como presente)."""
+    for key in keys:
+        if item.get(key) is not None:
+            return item[key]
+    return None
+
+
+def _opt_str(value: Any, *, upper: bool = False) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text.upper() if upper else text
+
+
 def parse_json_detalhe(
     file_path: Path, modalidade: str
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -369,14 +441,15 @@ def parse_json_detalhe(
     for item in lista_rateio:
         if not isinstance(item, dict):
             continue
+        # Campo ausente na fonte vira nulo: zero seria um dado inventado.
         rateio_rows.append(
             {
                 "modalidade": modalidade,
                 "concurso": int(concurso),
-                "faixa": int(item.get("faixa") or item.get("ordem") or 0),
-                "descricao_faixa": str(item.get("descricaoFaixa") or ""),
-                "ganhadores": int(item.get("numeroDeGanhadores") or 0),
-                "valor_premio": float(item.get("valorPremio") or 0.0),
+                "faixa": _opt_int(_first_present(item, "faixa", "ordem")),
+                "descricao_faixa": _opt_str(item.get("descricaoFaixa")),
+                "ganhadores": _opt_int(item.get("numeroDeGanhadores")),
+                "valor_premio": _opt_float(item.get("valorPremio")),
             }
         )
 
@@ -385,15 +458,16 @@ def parse_json_detalhe(
     for item in lista_ganhadores:
         if not isinstance(item, dict):
             continue
-        num_g = item.get("ganhadores") or item.get("numeroDeGanhadores") or 0
         ganhadores_rows.append(
             {
                 "modalidade": modalidade,
                 "concurso": int(concurso),
                 "posicao": item.get("posicao"),
-                "municipio": str(item.get("municipio") or "").strip(),
-                "uf": str(item.get("uf") or "").strip().upper(),
-                "ganhadores": int(num_g),
+                "municipio": _opt_str(item.get("municipio")),
+                "uf": _opt_str(item.get("uf"), upper=True),
+                "ganhadores": _opt_int(
+                    _first_present(item, "ganhadores", "numeroDeGanhadores")
+                ),
             }
         )
 
@@ -419,6 +493,25 @@ class LoteriasLakeConverter:
         res = ConvertResult()
         target_datasets = set(datasets or DATASETS)
 
+        if not input_dir.is_dir():
+            res.errors.append(f"diretório de entrada '{input_dir}' não existe")
+            return res
+
+        # Subdiretório ausente é erro quando o dataset foi pedido por nome; sem
+        # ``datasets`` (tudo), só quando não há nenhum: um acervo sem os detalhes
+        # ainda é convertível.
+        wanted = {
+            "concursos": input_dir / "concursos",
+            "detalhe": input_dir / "detalhe",
+        }
+        if "concursos" not in target_datasets:
+            del wanted["concursos"]
+        if not target_datasets & {"rateio", "ganhadores_municipio"}:
+            del wanted["detalhe"]
+        missing = [d for d in wanted.values() if not d.is_dir()]
+        if datasets or len(missing) == len(wanted):
+            res.errors.extend(f"diretório '{d}' não existe" for d in missing)
+
         # 1. Dataset 'concursos' from raw XLSX files
         if "concursos" in target_datasets:
             writer_concursos = LakeWriter(
@@ -440,6 +533,11 @@ class LoteriasLakeConverter:
                     # Stem is like 'megasena@20261101'
                     mod_slug = composite_file_key(raw_file).lower()
                     if mod_slug not in MODALIDADES:
+                        logger.warning(
+                            "LOTERIAS %s: modalidade %r desconhecida; arquivo ignorado",
+                            raw_file.name,
+                            mod_slug,
+                        )
                         continue
                     try:
                         if not force and writer_concursos.is_current(
@@ -448,7 +546,27 @@ class LoteriasLakeConverter:
                             res.skipped += 1
                             continue
 
-                        df = parse_xlsx_concursos(raw_file, mod_slug)
+                        discarded: list[str] = []
+                        df = parse_xlsx_concursos(
+                            raw_file, mod_slug, discarded=discarded
+                        )
+                        if discarded:
+                            total = df.height + len(discarded)
+                            detail = "; ".join(discarded[:3])
+                            if len(discarded) / total > MAX_DISCARDED_FRACTION:
+                                raise ValueError(
+                                    f"{len(discarded)} de {total} linhas com número "
+                                    f"de concurso ilegível (limite "
+                                    f"{MAX_DISCARDED_FRACTION:.0%}): {detail}"
+                                )
+                            logger.warning(
+                                "LOTERIAS %s: %d de %d linhas descartadas por "
+                                "número de concurso ilegível (%s)",
+                                raw_file.name,
+                                len(discarded),
+                                total,
+                                detail,
+                            )
                         writer_concursos.write_polars(
                             df,
                             raw_file,
@@ -502,6 +620,12 @@ class LoteriasLakeConverter:
             # concurso novo ser pulada por sha256 e perdia as demais linhas.
             for mod_slug, files in files_by_mod.items():
                 if mod_slug not in MODALIDADES:
+                    logger.warning(
+                        "LOTERIAS detalhe: modalidade %r desconhecida; %d arquivo(s) "
+                        "ignorado(s)",
+                        mod_slug,
+                        len(files),
+                    )
                     continue
                 partitions = {"modalidade": mod_slug}
                 targets = (

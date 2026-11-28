@@ -74,14 +74,14 @@ Lista dos municípios onde foram feitas as apostas ganhadoras de um concurso, co
 | `posicao` | `posicao` | inteiro | Posição do município na lista da fonte | — | todo |
 | `municipio` | `municipio` | texto | Nome do município em maiúsculas e sem acento, ou `CANAL ELETRONICO` | — | todo |
 | `uf` | `uf` | texto | Sigla da UF em maiúsculas; `--` para o canal eletrônico | sigla | todo |
-| `ganhadores` | `ganhadores` (ou `numeroDeGanhadores`) | inteiro | Número de ganhadores no município; zero quando a fonte não informa | ganhadores | todo |
+| `ganhadores` | `ganhadores` (ou `numeroDeGanhadores`) | inteiro | Número de ganhadores no município; nulo quando a fonte não informa | ganhadores | todo |
 | `_origem` | — (gerada) | texto | Chave do arquivo bruto de onde a linha veio (na amostra, o nome da modalidade) | — | todo |
 | `modalidade` | — (nome do arquivo) | texto | Modalidade em minúsculas | ver [concursos](concursos.md) | todo |
 
 ## No lake
 
 - Dataset `loterias/ganhadores_municipio`, particionado por `modalidade`; um Parquet por modalidade.
-- O conversor lê `listaMunicipioUFGanhadores`; textos perdem espaços nas pontas e a UF vai para maiúsculas. Município ausente vira texto vazio.
+- O conversor lê `listaMunicipioUFGanhadores`; textos perdem espaços nas pontas e a UF vai para maiúsculas. Município, UF ou número de ganhadores ausentes viram nulo.
 - Um concurso sem lista de ganhadores não gera arquivo.
 - Como em `rateio`, só o JSON mais recente de cada modalidade é convertido.
 

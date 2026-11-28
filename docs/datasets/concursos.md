@@ -75,7 +75,7 @@ Resultado de cada concurso das loterias federais da Caixa: a data do sorteio, as
 |---|---|---|---|---|---|
 | `concurso` | `Concurso` (Loteria Federal: `Extração`) | inteiro | Número do concurso | — | todo |
 | `data_sorteio` | `Data Sorteio`, `Data do Sorteio` (Mega-Sena) ou `Data de apuração` (Loteca) | texto | Data do sorteio, como a fonte publica | dd/mm/aaaa | todo |
-| `dezenas` | colunas `Bola1`, `Bola2`... (Super Sete: `Coluna 1`...) | texto | Dezenas sorteadas, na ordem das colunas da planilha, com dois dígitos e separadas por vírgula e espaço (`04, 05, 30, 33, 41, 52`); vazio quando a modalidade não tem colunas de bolas reconhecidas | — | todo |
+| `dezenas` | colunas `Bola1`, `Bola2`... (Super Sete: `Coluna 1`...) | texto | Dezenas sorteadas, na ordem das colunas da planilha, com dois dígitos e separadas por vírgula e espaço (`04, 05, 30, 33, 41, 52`); vazio na Loteria Federal e na Loteca, que não têm colunas de bolas; nas demais modalidades, planilha sem colunas de bolas reconhecidas é erro do arquivo | — | todo |
 | `arrecadacao_total` | `Arrecadação Total` | decimal | Arrecadação do concurso; nulo na Loteria Federal, que não tem a coluna | R$ | todo |
 | `acumulado` | `Acumulado <faixa principal>` | booleano | Verdadeiro quando a coluna da fonte vale `Sim`, `true`, `1` ou `S`. Só tem sentido nas modalidades em que a fonte publica `Sim`/`Não` (Dia de Sorte, Dupla Sena, Loteca e +Milionária); nas demais é sempre falso | — | todo |
 | `valor_acumulado` | — | decimal | Reservada para o valor acumulado; está nula em todas as linhas | R$ | nunca preenchida |
@@ -85,7 +85,7 @@ Resultado de cada concurso das loterias federais da Caixa: a data do sorteio, as
 ## No lake
 
 - Dataset `loterias/concursos`, particionado por `modalidade`; um Parquet por modalidade.
-- O conversor localiza as colunas pelo nome normalizado (sem acento, minúsculas), porque os nomes variam entre as modalidades. Colunas que ele não reconhece não vão para o lake: ganhadores e rateio por faixa, cidade e UF dos ganhadores, Mês da Sorte, Time do Coração, trevos, jogos da Loteca, prêmios da Loteria Federal, acumulados de sorteios especiais e a observação.
+- O conversor localiza as colunas pelo nome normalizado (sem acento, minúsculas), porque os nomes variam entre as modalidades. Planilha sem a coluna do concurso (`Concurso` ou, na Loteria Federal, `Extração`) é erro do arquivo e nada é gravado; o mesmo vale para planilha sem colunas de bolas fora da Federal e da Loteca. Linha com número de concurso ilegível é descartada e contada no log; se passam de 1% das linhas, o arquivo inteiro é erro. Colunas que ele não reconhece não vão para o lake: ganhadores e rateio por faixa, cidade e UF dos ganhadores, Mês da Sorte, Time do Coração, trevos, jogos da Loteca, prêmios da Loteria Federal, acumulados de sorteios especiais e a observação.
 - Valores em reais: remove `R$` e pontos de milhar e troca a vírgula decimal por ponto; `-` e vazio viram nulo.
 - Concurso: texto convertido para inteiro; linha sem número de concurso é descartada.
 - Se a leitura padrão da planilha falhar, o conversor tenta uma leitura alternativa (registrada em aviso).

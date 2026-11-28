@@ -74,8 +74,8 @@ Para cada concurso, as faixas de premiação (por exemplo, "6 acertos", "5 acert
 | `concurso` | `numero` (ou `concurso`) | inteiro | Número do concurso | — | todo |
 | `faixa` | `faixa` (ou `ordem`) | inteiro | Ordem da faixa de premiação, a partir de 1 | — | todo |
 | `descricao_faixa` | `descricaoFaixa` | texto | Descrição da faixa, como a fonte publica | — | todo |
-| `ganhadores` | `numeroDeGanhadores` | inteiro | Número de ganhadores da faixa; zero quando a faixa não teve ganhador ou a fonte não informou | ganhadores | todo |
-| `valor_premio` | `valorPremio` | decimal | Valor do prêmio de cada ganhador da faixa; zero quando a faixa não teve ganhador ou a fonte não informou | R$ | todo |
+| `ganhadores` | `numeroDeGanhadores` | inteiro | Número de ganhadores da faixa; zero quando a faixa não teve ganhador, nulo quando a fonte não informou | ganhadores | todo |
+| `valor_premio` | `valorPremio` | decimal | Valor do prêmio de cada ganhador da faixa; zero quando a faixa não teve ganhador, nulo quando a fonte não informou | R$ | todo |
 | `_origem` | — (gerada) | texto | Chave do arquivo bruto de onde a linha veio (na amostra, o nome da modalidade) | — | todo |
 | `modalidade` | — (nome do arquivo) | texto | Modalidade em minúsculas | ver [concursos](concursos.md) | todo |
 
@@ -83,14 +83,14 @@ Para cada concurso, as faixas de premiação (por exemplo, "6 acertos", "5 acert
 
 - Dataset `loterias/rateio`, particionado por `modalidade`; um Parquet por modalidade, com as linhas de cada arquivo bruto de origem (`_origem`).
 - O conversor lê a lista `listaRateioPremio` do JSON. Todo o resto do JSON fica de fora: data, dezenas, valores acumulados, arrecadação, local do sorteio e próximo concurso.
-- Valores ausentes viram zero (`faixa`, `ganhadores`, `valor_premio`) ou texto vazio (`descricao_faixa`).
+- Valores ausentes no JSON viram nulo (`faixa`, `descricao_faixa`, `ganhadores`, `valor_premio`); zero só quando a fonte informa zero.
 - Um JSON ilegível ou sem número de concurso é contado como erro e não gera linhas.
 - Para cada modalidade, o conversor usa só a versão mais recente entre os arquivos de mesmo nome base; por isso os JSONs diários mais antigos não entram no lake.
 
 ## Cuidados de uso
 
 - **Cobertura mínima.** O lake tem só o último concurso de cada modalidade na data da coleta. Para a série histórica de rateio, é preciso rodar o `backfill`; sem ele, não use este dataset para tendências.
-- **Zero não é ausência.** Uma faixa sem ganhadores tem `ganhadores` e `valor_premio` iguais a zero; o conversor também grava zero quando o campo falta no JSON.
+- **Zero não é ausência.** Uma faixa sem ganhadores tem `ganhadores` e `valor_premio` iguais a zero; quando o campo falta no JSON, o conversor grava nulo.
 - **O valor é por ganhador**, não o total da faixa. O total é `ganhadores * valor_premio`.
 - **Federal:** as "faixas" são os cinco prêmios da extração, rotulados "N acertos" pela fonte.
 - **Valores brutos de imposto.** A fonte não informa se os valores são antes ou depois do imposto de renda sobre prêmios; a planilha de Super Sete avisa que os valores do link "Locais da Sorte" são brutos, sem desconto.

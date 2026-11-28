@@ -5,6 +5,13 @@ Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/),
 e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [Não lançado]
+
+### Corrigido
+
+- **Conversor do lake não grava mais dado errado sem erro.** Antes, planilha sem a coluna `Concurso` usava a primeira coluna no lugar; sem colunas de bolas gravava `dezenas` vazio; linha com número de concurso ilegível sumia sem registro; e prêmio ou número de ganhadores ausentes no JSON viravam zero. Agora: planilha sem a coluna do concurso (`Concurso` ou, na Loteria Federal, `Extração`) ou, fora da Federal e da Loteca, sem colunas de bolas é erro do arquivo (a mensagem lista as colunas encontradas, nada é gravado e a conversão sai com erro); linhas com número ilegível são contadas num aviso e, acima de 1% das linhas, o arquivo inteiro é erro; campo ausente no JSON de detalhe (`faixa`, `descricaoFaixa`, `numeroDeGanhadores`, `valorPremio`, `municipio`, `uf`, `ganhadores`) vira nulo, e zero só quando a fonte informa zero. O esquema do Parquet não muda (as colunas já aceitavam nulo).
+- **Conversor com entrada ausente é erro.** Diretório de entrada inexistente, ou `concursos`/`detalhe` ausente quando o dataset foi pedido por nome (ou quando faltam os dois), devolvia resultado vazio sem erro; agora entra em `errors`. Arquivo de modalidade desconhecida é ignorado com aviso.
+
 ## [0.3.2] - 2026-11-24
 
 ### Corrigido
