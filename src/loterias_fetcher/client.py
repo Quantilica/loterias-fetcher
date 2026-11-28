@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from quantilica.core.http import HostPolicy, HttpClient
 from quantilica.core.logging import get_logger
@@ -66,6 +67,35 @@ def host_policies(
     return dict.fromkeys(hosts, chosen)
 
 
+_DEFAULT_BASE = urlsplit(DEFAULT_API_HOST)
+_ALLOWED_DOMAIN = ".caixa.gov.br"
+
+
+def validate_api_host(value: Any) -> str | None:
+    """Valida o endereço lido do ``params.txt``; ``None`` se não servir.
+
+    Só vale ``https`` em host de ``.caixa.gov.br`` (sem usuário, sem porta,
+    sem consulta) e com o mesmo caminho base do host fixo: as URLs são formadas
+    como ``<host>/api/...``. Nunca levanta exceção.
+    """
+    try:
+        parsed = urlsplit(str(value).strip())
+        hostname = parsed.hostname or ""
+        ok = (
+            parsed.scheme == "https"
+            and hostname.endswith(_ALLOWED_DOMAIN)
+            and parsed.username is None
+            and parsed.password is None
+            and parsed.port in (None, 443)
+            and not parsed.query
+            and not parsed.fragment
+            and parsed.path.rstrip("/") == _DEFAULT_BASE.path.rstrip("/")
+        )
+    except Exception:  # noqa: BLE001 - ``https://[::1`` e afins: valor inválido
+        return None
+    return f"https://{hostname}{_DEFAULT_BASE.path.rstrip('/')}" if ok else None
+
+
 class LoteriasClient:
     """Client for Caixa Loterias services."""
 
@@ -83,15 +113,14 @@ class LoteriasClient:
             resp = self.client.get(PARAMS_URL)
             if resp.status_code == 200:
                 data = resp.json()
-                host = (
-                    str(data.get("urlapiloterias") or "").rstrip("/")
-                    if isinstance(data, dict)
-                    else ""
-                )
-                if host:
+                raw = data.get("urlapiloterias") if isinstance(data, dict) else None
+                if not raw:
+                    reason = "resposta sem 'urlapiloterias'"
+                elif (host := validate_api_host(raw)) is not None:
                     self._api_host = host
                     return host
-                reason = "resposta sem 'urlapiloterias'"
+                else:
+                    reason = f"endereço rejeitado: {str(raw)[:80]!r}"
             else:
                 reason = f"HTTP {resp.status_code}"
         except Exception as exc:  # noqa: BLE001 - cai no host padrão, mas avisa

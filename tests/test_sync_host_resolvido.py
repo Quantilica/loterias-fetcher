@@ -18,18 +18,25 @@ from typer.testing import CliRunner
 
 from loterias_fetcher import plugin
 from loterias_fetcher.catalog import list_datasets
-from loterias_fetcher.client import LoteriasClient
+from loterias_fetcher.client import LoteriasClient, validate_api_host
 from loterias_fetcher.constants import DEFAULT_API_HOST, PARAMS_URL
 from loterias_fetcher.plugin import fetcher
 
-NOVO_HOST = "https://servicebus9.example.test/portaldeloterias"
+NOVO_HOST = "https://servicebus9.caixa.gov.br/portaldeloterias"
 
 
 class Api:
     """API falsa: registra as URLs pedidas e responde JSON (ou o que for dito)."""
 
-    def __init__(self, *, params: Any = None, fail_ids: tuple[str, ...] = ()) -> None:
+    def __init__(
+        self,
+        *,
+        params: Any = None,
+        fail_ids: tuple[str, ...] = (),
+        down_prefix: str | None = None,
+    ) -> None:
         self.params = params
+        self.down_prefix = down_prefix  # URLs com esse prefixo respondem 404
         self.fail_ids = fail_ids
         self.urls: list[str] = []
 
@@ -40,6 +47,8 @@ class Api:
             if self.params is None:
                 return httpx2.Response(500, text="erro")
             return httpx2.Response(200, text=json.dumps(self.params))
+        if self.down_prefix and url.startswith(self.down_prefix):
+            return httpx2.Response(404, text="host fora do ar")
         if any(f"/api/{slug}" in url for slug in self.fail_ids):
             return httpx2.Response(404, text="nao achei")
         return httpx2.Response(
@@ -82,7 +91,7 @@ def test_sync_usa_o_host_do_params(
     assert not any(DEFAULT_API_HOST in u for u in api.urls)
     assert api.urls.count(PARAMS_URL) == 1  # uma leitura por execução
     # o host novo passa a ter a política de tráfego
-    assert app.client.host_policies["servicebus9.example.test"] is rapida
+    assert app.client.host_policies["servicebus9.caixa.gov.br"] is rapida
     # o catálogo em si não é alterado
     assert all(e["url"].startswith(DEFAULT_API_HOST) for e in entries)
 
@@ -187,3 +196,106 @@ def test_download_contest_json_valido_grava_arquivo_e_manifesto(
     assert json.loads(dest.read_text()) == {"numero": 1}
     manifest = json.loads(Path(f"{dest}.manifest.json").read_text())
     assert manifest["source_id"] == "loterias"
+
+
+# --- validação do host lido do params.txt -------------------------------------
+
+
+@pytest.mark.parametrize(
+    "valor",
+    [
+        NOVO_HOST + "/api",  # caminho base diferente: geraria /api/api/...
+        "https://servicebus9.example.test/portaldeloterias",  # fora de caixa.gov.br
+        "https://evilcaixa.gov.br/portaldeloterias",
+        "https://servicebus9.caixa.gov.br.evil.test/portaldeloterias",
+        "http://servicebus9.caixa.gov.br/portaldeloterias",  # sem https
+        "javascript:alert(1)",
+        "https://[::1",  # ValueError no urlsplit
+        "https://user:senha@servicebus9.caixa.gov.br/portaldeloterias",
+        "https://servicebus9.caixa.gov.br:8443/portaldeloterias",
+        "https://servicebus9.caixa.gov.br/portaldeloterias?x=1",
+        "",
+        None,
+        42,
+    ],
+)
+def test_host_invalido_e_descartado(valor: Any) -> None:
+    assert validate_api_host(valor) is None
+
+
+@pytest.mark.parametrize("sufixo", ["", "/"])
+def test_host_valido_e_normalizado(sufixo: str) -> None:
+    assert validate_api_host(" " + NOVO_HOST + sufixo) == NOVO_HOST
+    maiusculo = "HTTPS://SERVICEBUS9.CAIXA.GOV.BR/portaldeloterias" + sufixo
+    assert validate_api_host(maiusculo) == NOVO_HOST
+
+
+@pytest.mark.parametrize(
+    "valor", [NOVO_HOST + "/api", "javascript:alert(1)", "https://[::1"]
+)
+def test_sync_com_host_invalido_no_params_usa_o_fixo_e_avisa(
+    monkeypatch: pytest.MonkeyPatch,
+    com_resolucao: None,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    valor: str,
+) -> None:
+    api = Api(params={"urlapiloterias": valor})
+    app = _app(monkeypatch, api)
+
+    with caplog.at_level(logging.WARNING):
+        ok, total, errors = app.download_datasets(
+            list_datasets("detalhe"), tmp_path, workers=2
+        )
+
+    assert (ok, total, errors) == (11, 11, [])
+    assert all(u.startswith(DEFAULT_API_HOST) for u in api.urls if u != PARAMS_URL)
+    assert "endereço rejeitado" in caplog.text
+
+
+def test_host_resolvido_que_falha_tenta_o_fixo_uma_vez(
+    monkeypatch: pytest.MonkeyPatch,
+    com_resolucao: None,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    api = Api(params={"urlapiloterias": NOVO_HOST}, down_prefix=NOVO_HOST)
+    app = _app(monkeypatch, api)
+    monkeypatch.setattr(
+        plugin, "host_policy", lambda: HostPolicy(min_interval=0.0, max_concurrency=2)
+    )
+
+    with caplog.at_level(logging.INFO):
+        ok, total, errors = app.download_datasets(
+            list_datasets("detalhe"), tmp_path, workers=2
+        )
+
+    assert (ok, total, errors) == (11, 11, [])
+    assert app.last_download_stats.succeeded_count == 11
+    assert app.last_download_stats.failed_count == 0
+    assert any(u.startswith(NOVO_HOST) for u in api.urls)
+    assert any(u.startswith(DEFAULT_API_HOST) for u in api.urls)
+    assert caplog.text.count("difere do fixo") == 1  # INFO uma vez por execução
+    assert caplog.text.count("tentando o host fixo") == 11
+
+
+def test_falha_nos_dois_hosts_conta_um_erro_por_entrada(
+    monkeypatch: pytest.MonkeyPatch, com_resolucao: None, tmp_path: Path
+) -> None:
+    api = Api(
+        params={"urlapiloterias": NOVO_HOST},
+        down_prefix=NOVO_HOST,
+        fail_ids=("quina",),
+    )
+    app = _app(monkeypatch, api)
+    monkeypatch.setattr(
+        plugin, "host_policy", lambda: HostPolicy(min_interval=0.0, max_concurrency=2)
+    )
+
+    ok, total, errors = app.download_datasets(
+        list_datasets("detalhe"), tmp_path, workers=2
+    )
+
+    assert (ok, total) == (10, 11)
+    assert [e[0] for e in errors] == ["quina_ultimo"]
+    assert app.last_download_stats.failed_count == 1

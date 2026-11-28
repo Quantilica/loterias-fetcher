@@ -76,28 +76,40 @@ class LoteriasFetcherApp(FetcherApp):
 
     def _entries_com_host_resolvido(
         self, client: HttpClient, entries: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], dict[Any, dict[str, Any]]]:
         """Troca o host fixo do catálogo pelo que a Caixa publica em ``params.txt``.
 
         O catálogo grava ``DEFAULT_API_HOST`` em todas as URLs; a Caixa já mudou de
         host mais de uma vez. Uma única leitura do ``params.txt`` por execução; se
         ela falhar, vale o host fixo (e :meth:`LoteriasClient.resolve_api_host`
-        registra o aviso). O host resolvido entra na política de tráfego se ainda
+        registra o aviso). O endereço lido é validado (``https`` em
+        ``.caixa.gov.br`` com o mesmo caminho base); outro valor é descartado com
+        aviso e vale o fixo. O host resolvido entra na política de tráfego se ainda
         não estiver nela.
+
+        Returns:
+            tuple: As entradas (com o host resolvido) e, por ``id``, as entradas
+            originais (host fixo) das que foram trocadas, para a nova tentativa.
         """
         host = LoteriasClient(client).resolve_api_host()
         if host == DEFAULT_API_HOST:
-            return entries
-        logger.info("Host da API pelo params.txt: %s", host)
+            return entries, {}
+        logger.info(
+            "Host da API pelo params.txt difere do fixo: usando %s (reserva: %s)",
+            host,
+            DEFAULT_API_HOST,
+        )
         netloc = urlsplit(host).hostname
         if netloc and netloc not in client.host_policies:
             client.host_policies[netloc] = host_policy()
-        return [
-            {**e, "url": host + str(e["url"])[len(DEFAULT_API_HOST) :]}
-            if str(e.get("url", "")).startswith(DEFAULT_API_HOST)
-            else e
-            for e in entries
-        ]
+        originais: dict[Any, dict[str, Any]] = {}
+        trocadas: list[dict[str, Any]] = []
+        for e in entries:
+            if str(e.get("url", "")).startswith(DEFAULT_API_HOST):
+                originais[e.get("id")] = e
+                e = {**e, "url": host + str(e["url"])[len(DEFAULT_API_HOST) :]}
+            trocadas.append(e)
+        return trocadas, originais
 
     def download_datasets(
         self,
@@ -135,7 +147,7 @@ class LoteriasFetcherApp(FetcherApp):
         errors: list[tuple[str, str]] = []
 
         with client:  # conexões persistentes, compartilhadas
-            entries = self._entries_com_host_resolvido(client, entries)
+            entries, originais = self._entries_com_host_resolvido(client, entries)
             workers = self._limit_workers(client, entries, workers)
             overall = make_batch_progress(console)
             file_prog = make_download_progress(console)
@@ -144,13 +156,29 @@ class LoteriasFetcherApp(FetcherApp):
 
             def _worker(entry: dict[str, Any]) -> bool:
                 eid = entry.get("id", "unknown")
-                try:
+
+                def _baixar(e: dict[str, Any]) -> Any:
                     with pool.acquire(description=f"[cyan]{eid}[/cyan]") as cb:
                         measured = stats.track().forwarding(cb)
                         self.download_entry(
-                            entry, output_dir, progress=measured, force=force
+                            e, output_dir, progress=measured, force=force
                         )
-                        stats.succeeded(measured)
+                        return measured
+
+                try:
+                    try:
+                        measured = _baixar(entry)
+                    except Exception as exc:
+                        original = originais.get(entry.get("id"))
+                        if original is None:
+                            raise
+                        logger.warning(
+                            "%s falhou no host resolvido (%s); tentando o host fixo",
+                            eid,
+                            exc,
+                        )
+                        measured = _baixar(original)
+                    stats.succeeded(measured)
                     return True
                 except Exception as exc:  # noqa: BLE001 - vira linha do relatório
                     stats.failed()
